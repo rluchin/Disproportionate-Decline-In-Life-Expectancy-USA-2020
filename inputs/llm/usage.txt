@@ -1,4 +1,0 @@
-Links to Conversations with GPT3.5 and GPT4 in regards to certain R chunks in the main .qmd project and replication of graphs:
-
-
-
