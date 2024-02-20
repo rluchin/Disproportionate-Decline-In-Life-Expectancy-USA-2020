@@ -1,0 +1,283 @@
+---
+title: "Disproportionate Decline In American Life Expectancy in 2020"
+author: "Russell Luchin, Michael Shmelev"
+thanks: "Code, data, and .QMD available at: LINK. All code and analysis done with R programming language (R Core Team, 2023). Credit to Jennifer B. Nuzzo and Jorge R. Ledesma for the replication package that was used as a basis for this project."
+date: 02-20-2024
+date-format: long
+abstract: "Abstract"
+format: pdf
+editor: visual
+---
+
+# Introduction
+
+```{r}
+#| echo: false
+#| include: false
+#| warning: false
+
+##LOAD REQUIRED PACKAGES
+##If packages are not installed, please install them by using --> 
+##"package.install("LIBRARYNAME")"
+
+library(ggpubr)
+library(ggplot2)
+library(readxl)
+library(lubridate)
+library(data.table)
+library(dplyr)
+library(knitr)
+
+```
+
+```{r}
+#| echo: false
+#| include: false
+##CREATE DATA FRAMES
+##Code adapted from Nuzzo and Ledesma, 2023
+
+## SET DIRECTORY -- replace with local directory when replicating
+mydir <- 'C:/Users/Russell/Desktop/Disproportionate Decline In Life Expectancy'
+
+deaths <- fread("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv")
+excess <- fread(paste0(mydir, '/data/IHME_excess_deaths.csv'))
+cmr    <- fread(paste0(mydir, '/data/smr.csv'))
+locs   <- fread(paste0(mydir, '/data/locs.csv'))
+ghs    <- data.table(readxl::read_excel(paste0(mydir, '/data/GHS_index.xlsx')))
+pops   <- fread(paste0(mydir, '/data/UN_pops.csv'))
+life <- fread(paste0(mydir, '/data/life_table.csv'))
+dths <- fread(paste0(mydir, '/data/all_cause_dth_rates.csv'), header=T)
+```
+
+# Data
+
+## Methodology
+
+Data was acquired from Nuzzo and Ledesma, 2023 (CITE). Raw data was imported from Arias et al, 2022 (CITE) and The World Bank, 2022. This data was acquired from a replication package for Nuzzo and Ledesma, 2023 (CITE). The data was cleaned and replicated as per the instructions of Nuzzo and Ledesma, 2023 (CITE) and the associated replication package.
+
+Data used to create Figures X and X were further cleaned and aggregated to isolate American life expectancy by ethnic group, separated between two groups "Non-Hispanic White" and "Non-White". As the raw data separates ethnic groups per the US Census (Hispanic, Non-Hispanic AIAN, Non-Hispanic Black, Non-Hispanic Asian, Non-Hispanic White) all groups that were outside the "Non-Hispanic White" category were averaged by summarizing their life expectancy at birth into a single variable. "Non-Hispanic White" was untouched beyond the initial preparation from Nuzzo and Ledesma, 2023 (CITE).
+
+Figure X was isolated from Figure 4(a) from Nuzzo and Ledesma, 2023 (CITE) to highlight expected American mortality rate against observed American mortality rate (all causes). This data comes from The World Bank, 2022 (CITE) and is cleaned according to the replication package from Nuzzo and Ledesma, 2023 (CITE). Other than isolating the American mortality rate from a larger figure, the data is left untouched and is accurate to the cleaned data retrieved from Nuzzo and Ledesma, 2023 (CITE).
+
+## Raw Data
+
+```{r}
+#| echo: false
+
+##Create table of raw data from Nuzzo and Ledesma, 2023
+kable(life, caption = "Life Expectancy by Racial Group")
+```
+
+Table 1 prints the raw data from the data-frame "life", created from the raw data in "life_table.csv" acquired from Arias et al, 2022. This data shows average life expectancy, per year from 2006 to 2021, separated by racial/ethnic group.
+
+```{r}
+#| echo: false
+
+##Create table of raw data from Nuzzo and Ledesma, 2023
+# Ensure dths is treated as a data.table
+setDT(dths)
+
+# Get the names of the first and the last three columns
+columns_to_include <- c(names(dths)[1], names(dths)[(ncol(dths)-2):ncol(dths)])
+
+# Display the first 3 rows and the specified columns
+kable(dths[1:6, ..columns_to_include], caption = "All Cause Death Rates")
+```
+
+Table 2 shows raw data from the data-table "dths", created from raw data in "all_cause_dth_rates.csv" acquired from The World Bank, 2022. This table shows the first column of the table (country name) alongside the last 3 columns of the total table (all cause death rate per 1000 people, separated by year) for the first 6 rows of the total data-table.
+
+## Prepared Data
+
+```{r}
+#| echo: false
+#| warning: false
+
+
+# Prepare "life" for plotting
+life <- melt(life, id.vars='year_id', variable.name='race', value.name='life_exp')
+life[race == 'All', race := 'All races and origins']
+life[, `Racial-ethnic group` := ifelse(race == 'Non-Hispanic White', 'Non-Hispanic White', 'Non-White')]
+
+# Aggregate 'Non-White' life expectancy values for each year
+life_avg <- life %>%
+  group_by(year_id, `Racial-ethnic group`) %>%
+  summarise(life_exp = mean(life_exp, na.rm = TRUE), .groups = 'drop')
+
+# Combine the first 3 and last 3 rows
+life_subset <- rbind(head(life, 3), tail(life, 3))
+
+# Display the table with kable
+kable(life_subset, caption = "Life Expectancy by Racial Group (Cleaned)")
+```
+
+Table 3 shows the first and last 3 rows of the prepared life expectancy data-frame. All racial groups outside of "Non-Hispanic White" have been aggregated into a single variable per year from 2006, while "Non-Hispanic White" remains untouched from the raw data.
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Remove unnecessary columns and rename
+dths[, `:=` (`Indicator Name`=NULL, `Indicator Code`=NULL)]
+setnames(dths, old=names(dths), new=c('location_name', 'iso3', paste0('year_', 1960:2022)))
+
+# Reshape data
+dths <- melt(data=dths, id.vars=c('location_name', 'iso3'), variable.name='year', value.name='dth_rate')
+dths[, year_id := as.integer(tstrsplit(year, '_')[[2]])]
+
+# Subset to the United States only and years of interest
+dths <- dths[iso3 == 'USA' & year_id %in% 2013:2021]
+
+# Since we're only dealing with the USA, the ordering by iso3 and renaming for 'KOR' are not needed
+dths[, t:= 1:.N, by=iso3]
+
+# Get predictions for the United States
+tmp <- dths[iso3 == 'USA']
+reg <- lm(data=tmp[year_id < 2020], formula=dth_rate~t)
+dths[iso3 == 'USA', preds := predict.lm(reg, newdata=.SD)]
+
+# Display the table with kable
+kable(dths, caption = "All Cause Death Rate (Prepared)")
+```
+
+Table 4 shows the prepared data from "dths", from "all_cause_death_rates.csv". In the preparation of this data, the same regression used to predict all cause death rates from Nuzzo and Ledesma, 2023 (CITE) was used to create the "preds" column. This regression used to compute expected death rates comes from running country specific linear regressions where observed death points from 2013 to 2019 were inputted, as described from Nuzzo and Ledesma, 2023 (CITE).
+
+## Measurement
+
+Data was measured through 4 independent variables. These variables are expected death rate, measured death rate, life expectancy, and total change in life expectancy. The latter 2 variables were separated by race, between "Non-White" and "Non-Hispanic White" in our prepared data. Measured data was nominal, collected and categorized by racial/ethnic group, year, and \# of deaths. Linear regression was used to calculate expected death rate, using the same linear regression replicated from Nuzzo and Ledesma, 2023 (CITE).
+
+Quantitative data was collected to create these variables, with Nuzzo and Ledesma, 2023 (CITE) being the foundational source for the measured variables. All 4 variables were predominantly measured in years, with the notable exception being where observed/expected death rate was also quantified with a ratio per 1000 (deaths per 1000 population). Measured data was prepared as per the replication package from Nuzzo and Ledesma, 2023 (CITE), with minor variations to the "life" and "dths" data-frames.
+
+# Results
+
+## Life Expectancy
+
+```{r}
+#| echo: false
+#| include: true
+#| warning: false
+
+##Code adapted from Nuzzo and Ledesma, 2023
+
+# Plotting life expectancy for 'Non-Hispanic White' vs. 'Non-White'
+A <- ggplot(data=life_avg, aes(x=year_id, y=life_exp, color=`Racial-ethnic group`)) +
+  geom_point(aes(shape=`Racial-ethnic group`), size=2.2, alpha=0.9) + 
+  geom_line(alpha=0.56, size=1.5) +
+  scale_y_continuous(name='Life Expectancy At Birth', limits=c(65, 85)) +
+  scale_x_continuous(name='', breaks=seq(min(life_avg$year_id), max(life_avg$year_id), by=2), limits=c(min(life_avg$year_id) - 0.5, max(life_avg$year_id) + 0.5)) +
+  scale_shape_manual(name="Racial Group", values=c(15, 16), labels=c('Non-Hispanic White', 'Non-White')) + 
+  scale_color_manual(name="Racial Group", values=c('Non-Hispanic White'='#186d38', 'Non-White'='#7f1621'), labels=c('Non-Hispanic White', 'Non-White')) +  
+  labs(title="Life Expectancy By Racial Group") +
+  theme_minimal() +
+  theme(axis.title=element_text(size=18), axis.text=element_text(size=14),
+        legend.position='top', legend.justification='left',
+        legend.text=element_text(size=10),
+        legend.title=element_text(size=12, face='bold'),
+        plot.title=element_text(size=20, face="bold", hjust=0.5),
+         axis.title.y=element_text(size=14, face="bold"))
+
+# To display the plot
+print(A)
+```
+
+Plotting our prepared life-expectancy data-frame we are able to identify significant trends in American life expectancy regarding racial disparity. Between 2006 and 2012 we observe a gradual closing of life expectancy disparities between white and non-white Americans. From 2012 to 2019 we observe life expectancy to be not significantly different between white and non-white Americans. This trend could be due to certain low-income healthcare programs being implemented in 2010, such as Obamacare (CITE). However, following the COVID-19 pandemic in 2020, we observe a dramatic decrease in life expectancy across both our measured categories. White Americans observe about half the decrease from non-white Americans, who see a far more dramatic decline in average life expectancy than white Americans.\
+\
+It should also be noted that both racial groups see a reversal in trends from 2006 to 2019 following the 2020 pandemic. From 2020 onwards, we observe a steady decline in average life expectancy when there seemed to be a steady increase up until 2019. This could point to a greater failure of the American healthcare system, although data for this is inconclusive as there is very little to extrapolate from 2020 onwards in this dataset.
+
+##  Change in Life Expectancy (2019-2020 and 2020-2021)
+
+```{r}
+#| echo: false
+#| include: true
+#| warning: false
+
+## DATA FOR PANEL B
+##Code adapted from Nuzzo and Ledesma, 2023
+
+tmp <- dcast(data=life[year_id %in% 2019:2021 & race != 'All races and origins'], 
+             formula=race~year_id, value.var='life_exp')
+tmp[, diff_2020_2019 := `2020` - `2019`]
+tmp[, diff_2021_2020 := `2021` - `2020`]
+
+# Categorize 'race' into 'Non-Hispanic White' and 'Non-White'
+tmp[, race := ifelse(race == 'Non-Hispanic White', 'Non-Hispanic White', 'Non-White')]
+
+# Aggregate changes for 'Non-White'
+tmp <- tmp[, .(diff_2020_2019 = mean(diff_2020_2019, na.rm = TRUE), 
+                diff_2021_2020 = mean(diff_2021_2020, na.rm = TRUE)), by = race]
+
+
+# Melt the adjusted dataset for plotting
+tmp <- melt(tmp, id.vars='race', measure.vars=c('diff_2020_2019', 'diff_2021_2020'), value.name='diff', variable.name='period')
+
+# Update the factor levels to reflect the new categorization
+tmp[, `Racial-ethnic group` := factor(race, levels=c('Non-Hispanic White', 'Non-White'))]
+
+## CREATE PANEL B
+B <- ggplot(data=tmp, aes(x=`Racial-ethnic group`, y=diff, fill=period)) +
+  geom_bar(stat='identity', position='dodge', alpha=0.71) +
+  scale_y_continuous(name='Change (years)', breaks=-5:0, limits=c(-5.5, 0)) +
+  scale_fill_manual(name='Time Period', values=c('#243f29', '#186d38'), labels=c('2020-2019', '2021-2020')) +
+  labs(title="Change in Life Expectancy", x="Year", y="Change (years)") +
+  theme_minimal() + labs(x='') +
+  geom_text(aes(label=sprintf('%+.1f', diff)), position=position_dodge(width=0.9), vjust=1.3, size=6) +
+  theme(axis.title=element_text(size=18), axis.text=element_text(size=14),
+        legend.text=element_text(size=12), legend.title=element_text(size=14, face='bold')) +
+  theme(axis.title=element_text(size=20), axis.text=element_text(size=14),
+        legend.position='top', legend.justification='left',
+        legend.text=element_text(size=10),
+        legend.title=element_text(size=12, face='bold'),
+        plot.title=element_text(size=20, face="bold", hjust=0.5),
+         axis.title.y=element_text(size=14, face="bold"))
+
+print(B)
+```
+
+Graphing change in life expectancy we observe a very concerning disparity between white and non-white Americans. While average life expectancy only dropped by about a year for white Americans, non-white Americans observed nearly a 4 year cut (averaged) to their life expectancy. This is a disparity of over 200% when, prior 2020, observed life expectancy was minimally different between white and non-white Americans.
+
+A disparity this large is abnormal, considering the gradual trend of life expectancy becoming equal between white and non-white Americans up to 2019 (Figure 1). Figure 2 supplements the dramatic difference in life expectancy dropping between white and non-white Americans by giving a nominal value (difference in life expectancy) to these groups. A difference of around 200% implies great stratification between white and non-white Americans, in spite of regular efforts to normalize healthcare access (CITE).
+
+## Expected vs Observed Death Rate
+
+```{r}
+#| echo: false
+#| include: true
+#| warning: false
+
+##Code adapted from Nuzzo and Ledesma, 2023
+
+# Plot the data
+A_2 <- ggplot(data=dths, aes(x=year_id)) +
+  geom_point(aes(y=dth_rate, color="Observed Death Rate"), size=1.7) +
+  geom_line(aes(y=dth_rate, color="Observed Death Rate"), alpha=0.25, size=0.95) +
+  geom_line(aes(y=preds, color="Expected Death Rate"), linetype=2, size=0.82, alpha=0.76) +
+  theme_minimal() +
+  scale_x_continuous(name='', limits=c(2012.5, 2021.5), breaks=2013:2021) +
+  scale_y_continuous(name='Death Rate / 1000', limits=c(4.5, 13)) +
+  scale_color_manual(name="", 
+                     values=c("Observed Death Rate" = '#144970', "Expected Death Rate" = 'black'),
+                     labels=c("Observed Death Rate", "Expected Death Rate"),
+                     breaks=c("Observed Death Rate", "Expected Death Rate")) +
+  labs(title="USA Expected Death Rate", x="Year", y="Death Rate / 1000") +
+  theme(axis.title=element_text(size=16, face='bold'), axis.text=element_text(size=10),
+        legend.position='top', legend.justification='left',
+        legend.text=element_text(size=10, face='bold'), legend.key.size = unit(4, "line"),
+        plot.title=element_text(size=20, face="bold", hjust=0.5)) +
+  theme(axis.title.y=element_text(size=14, face="bold"))
+
+# Print the plot
+print(A_2)
+```
+
+Figure 3 graphs our expected death rate alongside our observed death rate. As seen in Figure 3, there is a substantial difference between our predicted death rate (calculated using linear regression with death rates from 2013-2019) and our observed death rate; particularly in 2020.
+
+What should be noted is that, in 2020, the COVID-19 pandemic struck the globe as nations struggled to mitigate the damage the infection caused. The linear regression from Nuzzo and Ledesma, 2023 (CITE) has no way to account for this, and therefore the expected death rate continues the trends observed between 2013-2019.
+
+Cross referencing this data with Figure 1, we note some consistent data points. When comparing average life expectancy from 2013 to 2019, we note a slight decline in the expected lifespan across both white and non-white Americans. Figure 3 visualizes a slight increase in death rate, which is consistent with our findings in Figure 1.
+
+## Cross Referencing the Life Expectancy Change and Death Rate
+
+Comparing Figures 2 and 3, we observe a significant data point to be measured. Figure 3 observes a significant difference between expected death rate and observed death rate (per 1000), the difference being 2\~ deaths per 1000 people. By averaging the change in life expectancy from figure 2, we can reach a similar value. We average the change in life expectancy with this equation: **A = (x+y)/2**, where A is the average of X and Y.
+
+Focusing on the change between 2019 and 2020, we observe an average life expectancy drop of 2.5. Cross-referencing this average with the difference between expected and observed death rate from Figure 3, we note a similar increase of about 2.2\~ more deaths than expected. We see a similar pattern when observing the change between 2020 and 2021, where the average decrease in life expectancy is .85 years and the increase in death rate is about .5 years.
+
+As these values are not identical, it is a possibility that this is a coincidence. However, it can be further hypothesized that, if there was a lower disparity between the drop in average life expectancy between white and non-white Americans, then the observed increases in death rate per 1000 would be lower. This is because the drop observed in figure 2, and the climb observed in figure 3, have very similar nominal values assigned to them (differences of .2-.3 when an average is calculate across groups in figure 2 and compared to figure 3).\
